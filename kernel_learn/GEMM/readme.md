@@ -13,3 +13,6 @@ v2  read & write分析：
 
 v3  read & write分析：
     v3版本和v2版本的read & write次数是一样的，区别在于v2版本对于shared memory的空间需求太多了，但是GPU上面emory是有限的，v3版本把加载到shared memory块缩小，这样虽然加载次数变多（但是访存次数没有改变）详细见v3.png：
+
+v4  分析：
+    相比于v3版本，v4版本增加一个thread的计算量，并且使用向量化取值，提高内存带宽利用率。对于向量化取值，应用在global->shared memory,shared->local memory
