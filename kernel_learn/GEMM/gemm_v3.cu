@@ -49,7 +49,7 @@ __global__ void sgemm_gpu_v3(int m,int n,int k,float* A,float* B,float* C){
     __shared__ float B_shared[BLOCK_SIZE][BLOCK_SIZE];
 
     float temp=0.0f;
-    // 由于相比于v2版本做个更细的划分，所以需要做一次循环
+    // 由于相比于v2版本做个更细的划分，一次不能加载完，所以需要做一次循环
     for(int t=0;t<(k/BLOCK_SIZE);t++){ 
         A_shared[threadIdx.y][threadIdx.x]=A_start[threadIdx.y*k+t*BLOCK_SIZE+threadIdx.x];
         B_shared[threadIdx.y][threadIdx.x]=B_start[(threadIdx.y+t*BLOCK_SIZE)*n+threadIdx.x];
@@ -93,13 +93,13 @@ int main(){
     cudaMemcpy(matrix_A_device,matrix_A_host,mem_size_A,cudaMemcpyHostToDevice);
     cudaMemcpy(matrix_B_device,matrix_B_host,mem_size_B,cudaMemcpyHostToDevice);
 
-    // 模板函数的参数必须用constexpr关键字修饰
-    constexpr int BLOCK=16;  // 因为核函数是模板函数，所以对应的模板部分的参数必须是编译期常量，所以用 constexpr
+
+    constexpr int BLOCK=16;
 
     dim3 block(BLOCK,BLOCK);
     dim3 grid((m+BLOCK-1)/BLOCK,(n+BLOCK-1)/BLOCK);
 
-    // 带有模板的kernel启动方法
+
     sgemm_gpu_v3<BLOCK><<<grid,block>>>(m,n,k,matrix_A_device,matrix_B_device,matrix_C_device);
     cudaMemcpy(matrix_C_gpu_host,matrix_C_device,mem_size_C,cudaMemcpyDeviceToHost);
 
