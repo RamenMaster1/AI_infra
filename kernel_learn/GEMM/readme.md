@@ -10,3 +10,6 @@ v2  read & write分析：
     针对v1版本的重复读取，在v2里面使用shared memory，然后存放到shared memory中，让相邻的的两个thread不再重复到global memory中读取，详细见v2.png：
     1. read：由于一个block用两个大块，于是有(m/bm)*(n/bn)个block，每个block读取bm*k+bn*k两个大块的数据，然后存放到shared memory中，故对于global memory的访问次数变成：(m/bm)*(n/bn)*（bm*k+bn*k）=kmn*（1/bm+1/bn）
     2. write：mn
+
+v3  read & write分析：
+    v3版本和v2版本的read & write次数是一样的，区别在于v2版本对于shared memory的空间需求太多了，但是GPU上面emory是有限的，v3版本把加载到shared memory块缩小，这样虽然加载次数变多（但是访存次数没有改变）详细见v3.png：

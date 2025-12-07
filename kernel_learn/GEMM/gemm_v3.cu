@@ -35,8 +35,8 @@ void compare_matrix(int m, int n, float* A, float* B) {
     printf("Matrix comparison passed with epsilon=%f\n", epsilon);
 }
 
-template <int BLOCK_SIZE,int K_SIZE>
-__global__ void sgemm_gpu_v2(int m,int n,int k,float* A,float* B,float* C){
+template <int BLOCK_SIZE>
+__global__ void sgemm_gpu_v3(int m,int n,int k,float* A,float* B,float* C){
     
     const int idx=blockIdx.x*blockDim.x+threadIdx.x;
     const int idy=blockIdx.y*blockDim.y+threadIdx.y;
@@ -44,24 +44,22 @@ __global__ void sgemm_gpu_v2(int m,int n,int k,float* A,float* B,float* C){
     float *A_start=A+blockIdx.y*blockDim.y*k;
     float *B_start=B+blockIdx.x*blockDim.x;
 
-    // 共享内存的大小设置不能使用传入的参数，只能使用模板，因为模板参数在编译的时候确定
-    __shared__ float A_shared[BLOCK_SIZE][K_SIZE];
-    __shared__ float B_shared[K_SIZE][BLOCK_SIZE];
-
-    // 小心这部分索引
-    for(int s=0;s<k;s+=blockDim.x){
-        A_shared[threadIdx.y][threadIdx.x+s]=A_start[threadIdx.y*k+threadIdx.x+s];
-        B_shared[threadIdx.y+s][threadIdx.x]=B_start[(threadIdx.y+s)*n+threadIdx.x];
-    }
-
-    // __syncthreads()只同步同一个线程块内的线程;CPU和GPU同步需要通过cudaDeviceSynchronize()
-    __syncthreads();
-
+    // 共享内存的大小设置不能使用传入的参数，只能使用模板参数
+    __shared__ float A_shared[BLOCK_SIZE][BLOCK_SIZE];
+    __shared__ float B_shared[BLOCK_SIZE][BLOCK_SIZE];
 
     float temp=0.0f;
+    // 由于相比于v2版本做个更细的划分，所以需要做一次循环
+    for(int t=0;t<(k/BLOCK_SIZE);t++){ 
+        A_shared[threadIdx.y][threadIdx.x]=A_start[threadIdx.y*k+t*BLOCK_SIZE+threadIdx.x];
+        B_shared[threadIdx.y][threadIdx.x]=B_start[(threadIdx.y+t*BLOCK_SIZE)*n+threadIdx.x];
+        
+        __syncthreads();
 
-    for(int z=0;z<k;z++){
-        temp=temp+A_shared[threadIdx.y][z]*B_shared[z][threadIdx.x];
+        for(int i=0;i<BLOCK_SIZE;i++){
+            temp=temp+A_shared[threadIdx.y][i]*B_shared[i][threadIdx.x];
+        }
+
     }
     C[idy*n+idx]=temp;
 }
@@ -69,7 +67,7 @@ __global__ void sgemm_gpu_v2(int m,int n,int k,float* A,float* B,float* C){
 
 int main(){
     printf("sgemm\n");
-    int m=64,k=64,n=64;
+    int m=512,k=512,n=512;
 
     const size_t mem_size_A=m*k*sizeof(float);
     const size_t mem_size_B=n*k*sizeof(float);
@@ -97,13 +95,12 @@ int main(){
 
     // 模板函数的参数必须用constexpr关键字修饰
     constexpr int BLOCK=16;  // 因为核函数是模板函数，所以对应的模板部分的参数必须是编译期常量，所以用 constexpr
-    constexpr int K_SIZE=64;
 
     dim3 block(BLOCK,BLOCK);
     dim3 grid((m+BLOCK-1)/BLOCK,(n+BLOCK-1)/BLOCK);
 
     // 带有模板的kernel启动方法
-    sgemm_gpu_v2<BLOCK,K_SIZE><<<grid,block>>>(m,n,k,matrix_A_device,matrix_B_device,matrix_C_device);
+    sgemm_gpu_v3<BLOCK><<<grid,block>>>(m,n,k,matrix_A_device,matrix_B_device,matrix_C_device);
     cudaMemcpy(matrix_C_gpu_host,matrix_C_device,mem_size_C,cudaMemcpyDeviceToHost);
 
 
