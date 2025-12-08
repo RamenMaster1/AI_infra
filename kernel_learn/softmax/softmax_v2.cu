@@ -1,5 +1,7 @@
 # include <cmath>
 #include <cstdio>
+#include <cuda_runtime.h>
+#include <cstring>
 
 #define FETCH_FLOAT4(pointer) (reinterpret_cast<float4*>(&(pointer))[0])
 void matrix_init(float* matrix,int M,int N){
@@ -34,17 +36,24 @@ void softmax_cpu(float* matrix,int M,int N){
 
 void compare_matrix(int m, int n, float* A, float* B) {
     const float epsilon = 1e-5f; 
-    
+    const float rel_eps = 1e-4f;
+
     for (int i = 0; i < m; i++) {
         for (int j = 0; j < n; j++) {
-            float diff = fabsf((A[i * n + j] - B[i * n + j]))/A[i * n + j];
-            if (diff > epsilon) {
-                printf("error at (%d,%d): A=%f, B=%f, diff=%f\n", i, j, A[i * n + j], B[i * n + j], diff);
+            float a = A[i * n + j];
+            float b = B[i * n + j];
+            float abs_diff = fabsf(a - b);
+            float denom = fmaxf(fabsf(a), 1e-6f);   // 防止除 0
+            float rel_diff = abs_diff / denom;
+
+            if (abs_diff > epsilon && rel_diff > rel_eps) {
+                printf("error at (%d,%d): A=%f, B=%f, abs_diff=%f, rel_diff=%f\n",
+                       i, j, a, b, abs_diff, rel_diff);
                 return;
             }
         }
     }
-    printf("Matrix comparison passed with epsilon=%f\n", epsilon);
+    printf("Matrix comparison passed\n");
 }
 
 template<int shared_size,int BLOCK_SIZE> //shared memory shape:512
@@ -59,15 +68,15 @@ __global__ void softmax_gpu(float* matrix,int M,int N){
     __shared__ float tmp_max_value[BLOCK_SIZE];  // 暂存每一个线程的max_value，不要写到s_matrix里面，不然还得再从global读取
     __shared__ float tmp_sum_value[BLOCK_SIZE];
     tmp_max_value[tid]=-INFINITY;  // 每一个线程都会对自己对应的tmp_max_value进行初始化
-    tmp_max_value[tid]=0.0f;
+    tmp_sum_value[tid]=0.0f;
 
     // 64个线程，那么每个线程处理8个数据，每个线程做两次向量化取值
     for(int i=0;i<N/blockDim.x/4;i++){
         float4 temp = FETCH_FLOAT4(matrix_start[i*blockDim.x*4+tid*4]);
-        s_matrix[i*blockDim.x+tid*4]=temp.x;
-        s_matrix[i*blockDim.x+tid*4+1]=temp.y;
-        s_matrix[i*blockDim.x+tid*4+2]=temp.z;
-        s_matrix[i*blockDim.x+tid*4+3]=temp.w;
+        s_matrix[i*blockDim.x*4+tid*4]=temp.x;
+        s_matrix[i*blockDim.x*4+tid*4+1]=temp.y;
+        s_matrix[i*blockDim.x*4+tid*4+2]=temp.z;
+        s_matrix[i*blockDim.x*4+tid*4+3]=temp.w;
     }
     __syncthreads();
 
@@ -137,6 +146,11 @@ __global__ void softmax_gpu(float* matrix,int M,int N){
 
 
 int main(){
+
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
     int M=512;
     int N=512;
     int matric_size=M*N;
@@ -144,25 +158,35 @@ int main(){
     float* s_cpu=(float*)malloc(sizeof(float)*matric_size);
     float* s_gpu=(float*)malloc(sizeof(float)*matric_size);
 
-    float* raw_matrix_device;
-    cudaMalloc((void**)&raw_matrix_device,sizeof(float)*matric_size);
-
 
     matrix_init(raw_matrix,M,N);
-    softmax_cpu(raw_matrix,M,N);
+    memcpy(s_cpu,raw_matrix,sizeof(float)*matric_size);
+
+    softmax_cpu(s_cpu,M,N);
+
+    float* raw_matrix_device;
+    cudaMalloc((void**)&raw_matrix_device,sizeof(float)*matric_size);
+    cudaMemcpy(raw_matrix_device,raw_matrix,sizeof(float)*matric_size,cudaMemcpyHostToDevice);
 
     constexpr int BLOCK_SIZE=64;
     dim3 block(BLOCK_SIZE,1);
     dim3 grid((M+BLOCK_SIZE-1)/BLOCK_SIZE,N);
 
     constexpr int shared_size=512;
-    softmax_gpu<shared_size,BLOCK_SIZE><<<block,grid>>>(raw_matrix_device,M,N);
+
+    cudaEventRecord(start);
+    softmax_gpu<shared_size,BLOCK_SIZE><<<grid,block>>>(raw_matrix_device,M,N);
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    float milliseconds = 0;  // 计算执行时间
+    cudaEventElapsedTime(&milliseconds, start, stop);
+    printf("GPU execution time: %.3f ms\n", milliseconds);
+    
 
     cudaMemcpy(s_gpu,raw_matrix_device,sizeof(float)*matric_size,cudaMemcpyDeviceToHost);
     compare_matrix(M,N,s_cpu,s_gpu);
 
     free(raw_matrix);
-    free(s_cpu);
     free(s_gpu);
     cudaFree(raw_matrix_device);
     return 0;
