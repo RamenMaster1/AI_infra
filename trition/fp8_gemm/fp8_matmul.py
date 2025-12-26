@@ -30,3 +30,5 @@ def act_quant_kernel(input_ptr, quant_ptr, scaler, BLOCK_SIZE: tl.constexpr):
     # 将量化系数s存储到输出中
     tl.store(y_ptr + offs, y)
     tl.store(s_ptr + pid, s)
+    
+    
