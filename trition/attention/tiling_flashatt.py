@@ -34,7 +34,7 @@ def tiling_flashatt(Q:torch.Tensor,
             d_current=d_last*torch.exp(m_last-m_current)+torch.sum(torch.exp(X-m_current_view),dim=-1)
             
             # o_current=o_last*torch.exp(m_last-m_current)*d_last/d_current+torch.matmul(torch.exp(X-m_current_view)/d_current,V[i_start:i_end,:])
-            correction = (torch.exp(m_last - m_current) * d_last / d_current).view(-1, 1)
+            correction = (torch.exp(m_last - m_current) * d_last / d_current).view(-1, 1) #view 只是重塑形状，参数是一组维度，作用等同于 reshape（要求内存连续），-1 表示“这一维自动算”，只能出现一次；根据元素总数推导。
             o_current = correction * o_last + torch.matmul(
                 torch.exp(X - m_current_view) / d_current.view(-1, 1), 
                 V[i_start:i_end, :]
